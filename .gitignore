@@ -1,0 +1,8 @@
+node_modules
+out
+release
+.idea
+.DS_Store
+*.log
+*.tsbuildinfo
+coverage
