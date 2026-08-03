@@ -1,24 +1,55 @@
 # PixelBatch
 
+[阅读完整功能介绍与使用场景](docs/wechat/pixelbatch-tool/pixelbatch-wechat-article.md)
+
 PixelBatch 是面向电商运营与视觉团队的本地优先 AI 图片批处理桌面应用。当前 MVP 聚焦一条完整、可验证的主链路：
 
 > 导入商品图 → 套用或编写修图提示词 → 选择图片模型 → 批量处理 → 查看任务进度 → 前后对比 → 把好用的提示词和样片沉淀为配方
 
+## 界面预览
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/wechat/pixelbatch-tool/screenshots/01-workspace.png" alt="批量创作页面">
+      <br>
+      <sub>批量创作：导入图片、填写提示词并选择模型</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/wechat/pixelbatch-tool/screenshots/02-task-queue.png" alt="任务队列页面">
+      <br>
+      <sub>任务队列：按批次查看进度和状态</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/wechat/pixelbatch-tool/screenshots/03-task-detail.png" alt="任务详情与前后对比">
+      <br>
+      <sub>任务详情：前后对比、查看大图和批量另存</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/wechat/pixelbatch-tool/screenshots/05-prompt-library.png" alt="提示词库页面">
+      <br>
+      <sub>提示词库：保存提示词和前后对比样片</sub>
+    </td>
+  </tr>
+</table>
+
 ## 当前能力
 
-- 单张、多张、文件夹导入（PNG / JPG / JPEG / WEBP）
-- AI 修图批任务，应用内 2 路并发队列
-- OpenAI GPT Image 2（`gpt-image-2`）
-- Google Nano Banana 2（`gemini-3.1-flash-image`）
-- 模型 URL、API Key、模型名、启用状态和默认模型可配置
-- 任务列表、子项状态、失败信息、失败项重试
-- 完成结果的拖动式前后对比与本地文件定位
-- 结果大图查看，支持缩放、拖动、旋转与适应窗口
-- 将任务内所有成功结果批量另存到指定目录，同名文件自动安全重命名
-- 从任务结果保存提示词 + 前后样片
-- 手动保存提示词 + 封面图
-- SQLite 本地持久化；API Key 优先使用 Electron `safeStorage` 加密
-- 异常退出恢复：处理中项目重置为等待状态
+* 单张、多张、文件夹导入（PNG / JPG / JPEG / WEBP）
+* AI 修图批任务，应用内 2 路并发队列
+* OpenAI GPT Image 2（`gpt-image-2`）
+* Google Nano Banana 2（`gemini-3.1-flash-image`）
+* 模型 URL、API Key、模型名、启用状态和默认模型可配置
+* 任务列表、子项状态、失败信息、失败项重试
+* 完成结果的拖动式前后对比与本地文件定位
+* 结果大图查看，支持缩放、拖动、旋转与适应窗口
+* 将任务内所有成功结果批量另存到指定目录，同名文件自动安全重命名
+* 从任务结果保存提示词 + 前后样片
+* 手动保存提示词 + 封面图
+* SQLite 本地持久化；API Key 优先使用 Electron `safeStorage` 加密
+* 异常退出恢复：处理中项目重置为等待状态
 
 ## 产品边界
 
@@ -76,8 +107,8 @@ Electron Builder 会在 `release/` 生成当前操作系统对应的安装包。
 
 ## 数据位置
 
-- SQLite：Electron `userData` 目录下的 `pixelbatch.sqlite`
-- 处理结果：系统“图片”目录下的 `PixelBatch/<task-id>/`
-- 原图：只读，不覆盖、不移动
+* SQLite：Electron `userData` 目录下的 `pixelbatch.sqlite`
+* 处理结果：系统“图片”目录下的 `PixelBatch/<task-id>/`
+* 原图：只读，不覆盖、不移动
 
 删除提示词只删除数据库记录，不会删除原图或任务结果。删除已被历史任务引用的模型配置会被阻止，可将其停用。
