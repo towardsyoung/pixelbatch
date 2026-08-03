@@ -6,6 +6,11 @@ PixelBatch 是面向电商运营与视觉团队的本地优先 AI 图片批处�
 
 > 导入商品图 → 套用或编写修图提示词 → 选择图片模型 → 批量处理 → 查看任务进度 → 前后对比 → 把好用的提示词和样片沉淀为配方
 
+## 下载地址
+- Windows：https://my.feishu.cn/file/NbfdbTNRKoYbUIx7KgzcRIaknre
+
+- MacOS：https://my.feishu.cn/file/ZTyqbLEd7oR4PhxLRWjcSRQanHc
+
 ## 界面预览
 
 <table>
