@@ -4,7 +4,10 @@ import type {
   CreatePromptInput,
   CreateTaskInput,
   ImageTask,
-  SaveModelInput
+  RemoveTasksResult,
+  SaveModelInput,
+  TestModelInput,
+  TestModelResult
 } from '../shared/types'
 
 const api: AppApi = {
@@ -20,7 +23,9 @@ const api: AppApi = {
     create: (input: CreateTaskInput) => ipcRenderer.invoke('tasks:create', input),
     rename: (id, name) => ipcRenderer.invoke('tasks:rename', id, name),
     retry: (id) => ipcRenderer.invoke('tasks:retry', id),
-    exportCompleted: (id) => ipcRenderer.invoke('tasks:export-completed', id)
+    cancel: (id) => ipcRenderer.invoke('tasks:cancel', id),
+    exportCompleted: (id) => ipcRenderer.invoke('tasks:export-completed', id),
+    remove: (ids: string[]): Promise<RemoveTasksResult> => ipcRenderer.invoke('tasks:remove', ids)
   },
   prompts: {
     list: () => ipcRenderer.invoke('prompts:list'),
@@ -30,7 +35,8 @@ const api: AppApi = {
   models: {
     list: () => ipcRenderer.invoke('models:list'),
     save: (input: SaveModelInput) => ipcRenderer.invoke('models:save', input),
-    remove: (id) => ipcRenderer.invoke('models:remove', id)
+    remove: (id) => ipcRenderer.invoke('models:remove', id),
+    test: (input: TestModelInput): Promise<TestModelResult> => ipcRenderer.invoke('models:test', input)
   },
   system: {
     revealFile: (path) => ipcRenderer.invoke('system:reveal-file', path),

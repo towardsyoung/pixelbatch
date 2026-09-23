@@ -2,7 +2,9 @@
   "extends": "./tsconfig.base.json",
   "include": [
     "electron.vite.config.*",
+    "vite.web.config.ts",
     "src/main/**/*.ts",
+    "src/web/**/*.ts",
     "src/preload/**/*.ts",
     "src/shared/**/*.ts",
     "tests/**/*.ts"

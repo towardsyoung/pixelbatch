@@ -349,6 +349,13 @@ textarea:focus-visible {
   line-height: 1.55;
 }
 
+.tasks-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
 .page-heading__meta {
   flex: 0 0 auto;
   padding: 7px 9px;
@@ -484,6 +491,28 @@ textarea:focus-visible {
 
 .button--ghost:hover:not(:disabled) {
   background: var(--paper-2);
+}
+
+.button--danger {
+  color: var(--red);
+  background: var(--white);
+}
+
+.button--danger:hover:not(:disabled) {
+  background: #f8e8e4;
+}
+
+.button small {
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 99px;
+  color: var(--white);
+  background: var(--ink);
+  font-family: 'DM Mono', monospace;
+  font-size: 8px;
 }
 
 .button--accent {
@@ -857,9 +886,54 @@ textarea:focus-visible {
 .task-table__head,
 .task-row {
   display: grid;
-  grid-template-columns: minmax(300px, 2.3fr) minmax(150px, 1fr) minmax(120px, 0.8fr) 120px 110px;
+  grid-template-columns: 28px minmax(260px, 2.2fr) minmax(130px, 1fr) minmax(110px, 0.8fr) 108px 100px 72px;
   align-items: center;
   column-gap: 18px;
+}
+
+.task-check {
+  display: grid;
+  place-items: center;
+}
+
+.task-check input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--ink);
+  cursor: pointer;
+}
+
+.task-open {
+  display: contents;
+}
+
+.task-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.task-delete {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.task-delete:hover:not(:disabled) {
+  color: var(--red);
+  background: #f8e8e4;
+}
+
+.task-delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 .task-table__head {
@@ -877,12 +951,15 @@ textarea:focus-visible {
   width: 100%;
   min-height: 76px;
   padding: 10px 17px;
-  border: 0;
   border-bottom: 1px solid var(--line);
   background: var(--white);
   cursor: pointer;
   text-align: left;
   transition: 150ms ease;
+}
+
+.task-row.is-selected {
+  background: #f4f6ea;
 }
 
 .task-row:last-child {
@@ -893,7 +970,7 @@ textarea:focus-visible {
   background: #f2f4e8;
 }
 
-.task-row > span {
+.task-open > span {
   min-width: 0;
   color: var(--muted);
   font-size: 10px;
@@ -1115,15 +1192,9 @@ textarea:focus-visible {
 }
 
 .detail-heading__actions > .button small {
-  display: grid;
-  place-items: center;
   min-width: 19px;
   height: 19px;
   border-radius: 50%;
-  color: var(--white);
-  background: var(--ink);
-  font-family: 'DM Mono', monospace;
-  font-size: 8px;
 }
 
 .status-stamp--completed {
@@ -2021,6 +2092,10 @@ textarea:focus-visible {
   line-height: 1.7;
 }
 
+.modal-actions__test {
+  margin-right: auto;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -2222,11 +2297,13 @@ textarea:focus-visible {
 
   .task-table__head,
   .task-row {
-    grid-template-columns: minmax(260px, 2fr) minmax(130px, 1fr) 100px 100px;
+    grid-template-columns: 28px minmax(200px, 2fr) minmax(110px, 1fr) 92px 72px;
   }
 
-  .task-table__head > span:last-child,
-  .task-row > span:last-child {
+  .task-table__head > span:nth-child(4),
+  .task-table__head > span:nth-child(6),
+  .task-open > span:nth-child(3),
+  .task-open > span:nth-child(5) {
     display: none;
   }
 }

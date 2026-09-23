@@ -9,17 +9,21 @@ import {
   shell
 } from 'electron'
 import { readdir } from 'node:fs/promises'
-import { basename, extname, join } from 'node:path'
+import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { isImageFileName } from '../shared/images'
 import { AppDatabase } from './database'
+import { createElectronSecretStore } from './electron-secrets'
 import { copyResultsToDirectory } from './export-results'
+import { testModelConfiguration } from './providers'
+import { removeTasksAndFiles } from './remove-tasks'
 import { TaskRunner } from './task-runner'
-import type { CreatePromptInput, CreateTaskInput, SaveModelInput } from '../shared/types'
+import type { CreatePromptInput, CreateTaskInput, SaveModelInput, TestModelInput } from '../shared/types'
 
-const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp'])
 let mainWindow: BrowserWindow | null = null
 let database: AppDatabase
 let taskRunner: TaskRunner
+let outputRoot = ''
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -62,7 +66,7 @@ function createWindow(): void {
 async function listImagesInFolder(folder: string): Promise<string[]> {
   const entries = await readdir(folder, { withFileTypes: true })
   return entries
-    .filter((entry) => entry.isFile() && IMAGE_EXTENSIONS.has(extname(entry.name).toLowerCase()))
+    .filter((entry) => entry.isFile() && isImageFileName(entry.name))
     .map((entry) => join(folder, entry.name))
     .sort((a, b) => a.localeCompare(b, 'zh-CN'))
 }
@@ -117,6 +121,18 @@ function registerIpc(): void {
     database.retryTask(id)
     taskRunner.enqueue(id)
   })
+  ipcMain.handle('tasks:cancel', (_event, id: string) => {
+    const task = database.getTask(id)
+    if (!task) throw new Error('找不到这个任务批次。')
+    const waiting = database.getRunnableItems(id).length > 0
+    const running = task.items?.some((item) => item.status === 'running') || taskRunner.isRunning(id)
+    if (!waiting && !running) throw new Error('这个任务没有可取消的图片。')
+    taskRunner.cancel(id)
+  })
+  ipcMain.handle('tasks:remove', (_event, ids: string[]) => {
+    if (!Array.isArray(ids)) throw new Error('请选择要删除的任务。')
+    return removeTasksAndFiles({ database, taskRunner, outputRoot, ids })
+  })
   ipcMain.handle('tasks:export-completed', async (_event, id: string) => {
     const task = database.getTask(id)
     const outputPaths =
@@ -148,6 +164,9 @@ function registerIpc(): void {
   ipcMain.handle('models:list', () => database.listModels())
   ipcMain.handle('models:save', (_event, input: SaveModelInput) => database.saveModel(input))
   ipcMain.handle('models:remove', (_event, id: string) => database.removeModel(id))
+  ipcMain.handle('models:test', (_event, input: TestModelInput) =>
+    testModelConfiguration(input, (id) => database.getModel(id))
+  )
 
   ipcMain.handle('system:reveal-file', (_event, path: string) => shell.showItemInFolder(path))
 }
@@ -156,11 +175,13 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.pixelbatch.desktop')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
-  database = new AppDatabase(join(app.getPath('userData'), 'pixelbatch.sqlite'))
-  taskRunner = new TaskRunner(
-    database,
-    join(app.getPath('pictures'), 'PixelBatch'),
-    (task) => mainWindow?.webContents.send('task:changed', task)
+  database = new AppDatabase(
+    join(app.getPath('userData'), 'pixelbatch.sqlite'),
+    createElectronSecretStore()
+  )
+  outputRoot = join(app.getPath('pictures'), 'PixelBatch')
+  taskRunner = new TaskRunner(database, outputRoot, (task) =>
+    mainWindow?.webContents.send('task:changed', task)
   )
   for (const task of database.listTasks()) {
     if (task.status === 'queued' || task.status === 'running') taskRunner.enqueue(task.id)
@@ -169,7 +190,7 @@ app.whenReady().then(async () => {
   await protocol.handle('pixelbatch', (request) => {
     const url = new URL(request.url)
     const filePath = url.searchParams.get('path')
-    if (!filePath || !IMAGE_EXTENSIONS.has(extname(filePath).toLowerCase())) {
+    if (!filePath || !isImageFileName(filePath)) {
       return new Response('Invalid image path', { status: 400 })
     }
     return net.fetch(pathToFileURL(filePath).toString())

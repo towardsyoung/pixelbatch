@@ -3,6 +3,7 @@ import {
   Archive,
   ArrowLeft,
   CheckCircle2,
+  CircleStop,
   Clock3,
   Download,
   FolderSearch,
@@ -13,10 +14,11 @@ import {
   RefreshCw,
   Save,
   Sparkles,
+  Trash2,
   X
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import type { ImageTask, TaskItem } from '../../../shared/types'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ImageTask, RemoveTasksResult, TaskItem } from '../../../shared/types'
 import { CompareView } from '../components/CompareView'
 import { ImageViewer } from '../components/ImageViewer'
 
@@ -32,8 +34,10 @@ interface TasksProps {
   tasks: ImageTask[]
   initialTaskId: string | null
   onRetry: (id: string) => Promise<void>
+  onCancel: (id: string) => Promise<void>
   onExport: (id: string) => Promise<void>
   onRename: (id: string, name: string) => Promise<ImageTask | null>
+  onRemove: (ids: string[]) => Promise<RemoveTasksResult | null>
   onSavePrompt: (task: ImageTask, item: TaskItem) => Promise<void>
 }
 
@@ -41,8 +45,10 @@ export function Tasks({
   tasks,
   initialTaskId,
   onRetry,
+  onCancel,
   onExport,
   onRename,
+  onRemove,
   onSavePrompt
 }: TasksProps) {
   const [selectedId, setSelectedId] = useState<string | null>(initialTaskId)
@@ -51,6 +57,21 @@ export function Tasks({
   const [viewerItem, setViewerItem] = useState<TaskItem | null>(null)
   const [editingName, setEditingName] = useState<string | null>(null)
   const [renaming, setRenaming] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [deleting, setDeleting] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const selectAllRef = useRef<HTMLInputElement>(null)
+  const allSelected = tasks.length > 0 && selectedIds.length === tasks.length
+
+  useEffect(() => {
+    setSelectedIds((current) => current.filter((id) => tasks.some((task) => task.id === id)))
+  }, [tasks])
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = selectedIds.length > 0 && !allSelected
+    }
+  }, [allSelected, selectedIds.length])
 
   useEffect(() => {
     if (!selectedId) {
@@ -69,6 +90,57 @@ export function Tasks({
     () => detail?.items?.find((item) => item.id === selectedItemId) ?? null,
     [detail, selectedItemId]
   )
+
+  function toggleTask(id: string) {
+    setSelectedIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    )
+  }
+
+  async function cancelTask(id: string) {
+    const task = tasks.find((item) => item.id === id) ?? (detail?.id === id ? detail : null)
+    if (!task) return
+    if (
+      !window.confirm('取消这个任务？还没开始的图片会停止，正在处理的图片会完成。')
+    ) {
+      return
+    }
+    setCancelling(true)
+    try {
+      await onCancel(id)
+    } finally {
+      setCancelling(false)
+    }
+  }
+
+  async function deleteTasks(ids: string[]) {
+    const chosen = tasks.filter((task) => ids.includes(task.id))
+    const deletable = chosen.filter((task) => task.status !== 'running')
+    const runningCount = chosen.length - deletable.length
+    if (deletable.length === 0) {
+      window.alert('处理中的任务不能删除，请等它结束后再删。')
+      return
+    }
+    const target =
+      deletable.length === 1 ? `任务「${deletable[0]?.name ?? ''}」` : `这 ${deletable.length} 个任务`
+    const runningNote = runningCount > 0 ? `\n${runningCount} 个处理中的任务会保留。` : ''
+    if (
+      !window.confirm(
+        `删除${target}？\n任务记录会被移除。未被提示词库引用的处理结果会一起删除，原图保留。${runningNote}`
+      )
+    ) {
+      return
+    }
+    setDeleting(true)
+    try {
+      const result = await onRemove(deletable.map((task) => task.id))
+      if (!result) return
+      setSelectedIds((current) => current.filter((id) => !result.deletedIds.includes(id)))
+      if (selectedId && result.deletedIds.includes(selectedId)) setSelectedId(null)
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   async function saveName() {
     if (!detail || editingName === null || !editingName.trim()) return
@@ -146,6 +218,23 @@ export function Tasks({
             <p>{detail.prompt}</p>
           </div>
           <div className="detail-heading__actions">
+            {(detail.status === 'queued' || detail.status === 'running') && (
+              <button
+                className="button button--ghost"
+                disabled={cancelling}
+                onClick={() => void cancelTask(detail.id)}
+              >
+                <CircleStop size={16} /> 取消任务
+              </button>
+            )}
+            <button
+              className="button button--danger"
+              disabled={detail.status === 'running' || deleting}
+              title={detail.status === 'running' ? '处理中的任务不能删除' : '删除这个任务'}
+              onClick={() => void deleteTasks([detail.id])}
+            >
+              <Trash2 size={16} /> 删除任务
+            </button>
             <button
               className="button button--accent"
               disabled={detail.completed === 0}
@@ -276,9 +365,19 @@ export function Tasks({
       <header className="page-heading">
         <div className="page-heading__copy">
           <div className="eyebrow">QUEUE / 任务队列</div>
-          <p>处理中任务会自动刷新；关闭应用后，下次打开会继续未完成项目。</p>
+          <p>处理中任务会自动刷新。不需要的批次可以勾选后删除，处理中的任务会保留。</p>
         </div>
-        <span className="page-heading__meta">{tasks.length} 批任务</span>
+        <div className="tasks-toolbar">
+          <button
+            className="button button--danger"
+            disabled={selectedIds.length === 0 || deleting}
+            onClick={() => void deleteTasks(selectedIds)}
+          >
+            <Trash2 size={15} /> 删除所选
+            {selectedIds.length > 0 && <small>{selectedIds.length}</small>}
+          </button>
+          <span className="page-heading__meta">{tasks.length} 批任务</span>
+        </div>
       </header>
 
       {tasks.length === 0 ? (
@@ -290,44 +389,97 @@ export function Tasks({
       ) : (
         <div className="task-table">
           <div className="task-table__head">
+            <label className="task-check">
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                checked={allSelected}
+                aria-label="选择全部任务"
+                onChange={() =>
+                  setSelectedIds(allSelected ? [] : tasks.map((task) => task.id))
+                }
+              />
+            </label>
             <span>任务</span>
             <span>模型</span>
             <span>进度</span>
             <span>状态</span>
             <span>创建时间</span>
+            <span />
           </div>
           {tasks.map((task) => {
             const progress = task.total ? Math.round((task.completed / task.total) * 100) : 0
+            const checked = selectedIds.includes(task.id)
             return (
-              <button className="task-row" key={task.id} onClick={() => setSelectedId(task.id)}>
-                <span className="task-name">
-                  <span className="task-thumb">
-                    {task.status === 'running' ? (
-                      <LoaderCircle className="spin" size={20} />
-                    ) : (
-                      <Sparkles size={20} />
-                    )}
+              <div
+                className={checked ? 'task-row is-selected' : 'task-row'}
+                key={task.id}
+                onClick={() => setSelectedId(task.id)}
+              >
+                <label className="task-check" onClick={(event) => event.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    aria-label={`选择任务 ${task.name}`}
+                    onChange={() => toggleTask(task.id)}
+                  />
+                </label>
+                <button type="button" className="task-open" onClick={() => setSelectedId(task.id)}>
+                  <span className="task-name">
+                    <span className="task-thumb">
+                      {task.status === 'running' ? (
+                        <LoaderCircle className="spin" size={20} />
+                      ) : (
+                        <Sparkles size={20} />
+                      )}
+                    </span>
+                    <span>
+                      <strong>{task.name}</strong>
+                      <small>{task.prompt}</small>
+                    </span>
+                  </span>
+                  <span>{task.modelName}</span>
+                  <span className="progress-cell">
+                    <span>
+                      <i style={{ width: `${progress}%` }} />
+                    </span>
+                    <small>
+                      {task.completed}/{task.total}
+                    </small>
                   </span>
                   <span>
-                    <strong>{task.name}</strong>
-                    <small>{task.prompt}</small>
+                    <span className={`status-pill status-pill--${task.status}`}>
+                      {statusIcon(task.status)}
+                      {statusText[task.status]}
+                    </span>
                   </span>
-                </span>
-                <span>{task.modelName}</span>
-                <span className="progress-cell">
-                  <span>
-                    <i style={{ width: `${progress}%` }} />
-                  </span>
-                  <small>{task.completed}/{task.total}</small>
-                </span>
-                <span>
-                  <span className={`status-pill status-pill--${task.status}`}>
-                    {statusIcon(task.status)}
-                    {statusText[task.status]}
-                  </span>
-                </span>
-                <span>{formatDate(task.createdAt)}</span>
-              </button>
+                  <span>{formatDate(task.createdAt)}</span>
+                </button>
+                <div className="task-actions" onClick={(event) => event.stopPropagation()}>
+                  {(task.status === 'queued' || task.status === 'running') && (
+                    <button
+                      type="button"
+                      className="task-delete"
+                      aria-label={`取消任务 ${task.name}`}
+                      title="取消还没开始的图片"
+                      disabled={cancelling}
+                      onClick={() => void cancelTask(task.id)}
+                    >
+                      <CircleStop size={15} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="task-delete"
+                    aria-label={`删除任务 ${task.name}`}
+                    title={task.status === 'running' ? '处理中的任务不能删除' : '删除任务'}
+                    disabled={task.status === 'running' || deleting}
+                    onClick={() => void deleteTasks([task.id])}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </div>
             )
           })}
         </div>

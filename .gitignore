@@ -1,6 +1,7 @@
 node_modules
 out
 release
+data
 .idea
 .DS_Store
 *.log

@@ -14,8 +14,10 @@ import type {
   ImageTask,
   ModelConfig,
   PromptPreset,
+  RemoveTasksResult,
   SaveModelInput,
-  TaskItem
+  TaskItem,
+  TestModelInput
 } from '../../shared/types'
 import { Models } from './pages/Models'
 import { PromptLibrary } from './pages/PromptLibrary'
@@ -158,11 +160,44 @@ export default function App() {
     }
   }
 
+  async function testModel(input: TestModelInput) {
+    try {
+      const result = await window.pixelbatch.models.test(input)
+      setToast(result.message)
+    } catch (error) {
+      showError(error)
+    }
+  }
+
   async function removeModel(id: string) {
     if (!window.confirm('删除这个模型配置？此操作不可撤销。')) return
     try {
       await window.pixelbatch.models.remove(id)
       await refreshModels()
+    } catch (error) {
+      showError(error)
+    }
+  }
+
+  async function removeTasks(ids: string[]): Promise<RemoveTasksResult | null> {
+    try {
+      const result = await window.pixelbatch.tasks.remove(ids)
+      setTasks((current) => current.filter((task) => !result.deletedIds.includes(task.id)))
+      const kept =
+        result.skippedIds.length > 0 ? `，${result.skippedIds.length} 个处理中的任务已保留` : ''
+      setToast(`已删除 ${result.deletedIds.length} 个任务${kept}`)
+      return result
+    } catch (error) {
+      showError(error)
+      return null
+    }
+  }
+
+  async function cancelTask(id: string) {
+    try {
+      await window.pixelbatch.tasks.cancel(id)
+      await refreshTasks()
+      setToast('已停止还没开始的图片，正在处理的会完成')
     } catch (error) {
       showError(error)
     }
@@ -299,8 +334,10 @@ export default function App() {
             tasks={tasks}
             initialTaskId={initialTaskId}
             onRetry={retryTask}
+            onCancel={cancelTask}
             onExport={exportCompletedResults}
             onRename={renameTask}
+            onRemove={removeTasks}
             onSavePrompt={savePromptFromTask}
           />
         )}
@@ -317,7 +354,7 @@ export default function App() {
           />
         )}
         {page === 'models' && (
-          <Models models={models} onSave={saveModel} onRemove={removeModel} />
+          <Models models={models} onSave={saveModel} onRemove={removeModel} onTest={testModel} />
         )}
       </main>
 

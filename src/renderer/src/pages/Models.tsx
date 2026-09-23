@@ -1,12 +1,13 @@
-import { Check, KeyRound, Plus, Server, ShieldCheck, Trash2 } from 'lucide-react'
+import { Check, KeyRound, PlugZap, Plus, Server, ShieldCheck, Trash2 } from 'lucide-react'
 import { useState } from 'react'
-import type { ModelConfig, ProviderType, SaveModelInput } from '../../../shared/types'
+import type { ModelConfig, ProviderType, SaveModelInput, TestModelInput } from '../../../shared/types'
 import { Modal } from '../components/Modal'
 
 interface ModelsProps {
   models: ModelConfig[]
   onSave: (input: SaveModelInput) => Promise<void>
   onRemove: (id: string) => Promise<void>
+  onTest: (input: TestModelInput) => Promise<void>
 }
 
 const emptyModel: SaveModelInput = {
@@ -19,8 +20,9 @@ const emptyModel: SaveModelInput = {
   isDefault: false
 }
 
-export function Models({ models, onSave, onRemove }: ModelsProps) {
+export function Models({ models, onSave, onRemove, onTest }: ModelsProps) {
   const [editing, setEditing] = useState<SaveModelInput | null>(null)
+  const [testingId, setTestingId] = useState<string | null>(null)
 
   function edit(model: ModelConfig) {
     setEditing({
@@ -52,6 +54,15 @@ export function Models({ models, onSave, onRemove }: ModelsProps) {
     if (!editing) return
     await onSave(editing)
     setEditing(null)
+  }
+
+  async function test(input: TestModelInput, key: string) {
+    setTestingId(key)
+    try {
+      await onTest(input)
+    } finally {
+      setTestingId(null)
+    }
   }
 
   return (
@@ -121,6 +132,24 @@ export function Models({ models, onSave, onRemove }: ModelsProps) {
                     <Trash2 size={15} />
                   </button>
                 )}
+                <button
+                  className="button button--ghost"
+                  disabled={testingId === model.id}
+                  onClick={() =>
+                    void test(
+                      {
+                        id: model.id,
+                        name: model.name,
+                        provider: model.provider,
+                        baseUrl: model.baseUrl,
+                        model: model.model
+                      },
+                      model.id
+                    )
+                  }
+                >
+                  <PlugZap size={14} /> {testingId === model.id ? '测试中…' : '测试连接'}
+                </button>
                 <button className="button button--ghost" onClick={() => edit(model)}>
                   编辑配置
                 </button>
@@ -212,6 +241,27 @@ export function Models({ models, onSave, onRemove }: ModelsProps) {
               </label>
             </div>
             <div className="modal-actions">
+              <button
+                className="button button--ghost modal-actions__test"
+                disabled={
+                  testingId === 'draft' || !editing.baseUrl.trim() || !editing.model.trim()
+                }
+                onClick={() =>
+                  void test(
+                    {
+                      id: editing.id,
+                      name: editing.name,
+                      provider: editing.provider,
+                      baseUrl: editing.baseUrl,
+                      apiKey: editing.apiKey,
+                      model: editing.model
+                    },
+                    'draft'
+                  )
+                }
+              >
+                <PlugZap size={14} /> {testingId === 'draft' ? '测试中…' : '测试连接'}
+              </button>
               <button className="button button--ghost" onClick={() => setEditing(null)}>
                 取消
               </button>

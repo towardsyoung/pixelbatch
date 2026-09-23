@@ -1,7 +1,7 @@
-import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
-import { safeStorage } from 'electron'
+import type { SecretStore } from './secret-store'
+import { SqliteDatabase } from './sqlite'
 import type {
   CreatePromptInput,
   CreateTaskInput,
@@ -17,11 +17,20 @@ import { deriveTaskStatus } from '../shared/task-utils'
 
 type DbRow = Record<string, unknown>
 
-export class AppDatabase {
-  private readonly db: Database.Database
+const TASK_SELECT_COLUMNS = `
+  t.id, t.name, t.operation, t.prompt, t.model_config_id,
+  COALESCE(NULLIF(m.name, ''), t.model_name) AS model_name,
+  t.status, t.created_at, t.updated_at
+`
 
-  constructor(path: string) {
-    this.db = new Database(path)
+export class AppDatabase {
+  private readonly db: SqliteDatabase
+
+  constructor(
+    path: string,
+    private readonly secrets: SecretStore
+  ) {
+    this.db = new SqliteDatabase(path)
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON')
     this.migrate()
@@ -54,10 +63,10 @@ export class AppDatabase {
         operation TEXT NOT NULL,
         prompt TEXT NOT NULL,
         model_config_id TEXT NOT NULL,
+        model_name TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY(model_config_id) REFERENCES model_configs(id)
+        updated_at TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS task_items (
@@ -87,6 +96,42 @@ export class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_prompts_created ON prompt_presets(created_at DESC);
     `)
+    this.detachTaskModelForeignKey()
+  }
+
+  private detachTaskModelForeignKey(): void {
+    const foreignKeys = this.db.prepare('PRAGMA foreign_key_list(tasks)').all() as DbRow[]
+    const columns = this.db.prepare('PRAGMA table_info(tasks)').all() as DbRow[]
+    const hasModelForeignKey = foreignKeys.some((row) => row.table === 'model_configs')
+    const hasModelName = columns.some((row) => row.name === 'model_name')
+    if (!hasModelForeignKey && hasModelName) return
+
+    const modelName = hasModelName ? "NULLIF(t.model_name, '')" : 'NULL'
+    this.db.exec('PRAGMA foreign_keys = OFF')
+    this.db.exec(`
+      CREATE TABLE tasks_migrated (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        model_config_id TEXT NOT NULL,
+        model_name TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO tasks_migrated
+        (id, name, operation, prompt, model_config_id, model_name, status, created_at, updated_at)
+      SELECT t.id, t.name, t.operation, t.prompt, t.model_config_id,
+             COALESCE(${modelName}, m.name, ''),
+             t.status, t.created_at, t.updated_at
+      FROM tasks t
+      LEFT JOIN model_configs m ON m.id = t.model_config_id;
+      DROP TABLE tasks;
+      ALTER TABLE tasks_migrated RENAME TO tasks;
+      CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at DESC);
+    `)
+    this.db.exec('PRAGMA foreign_keys = ON')
   }
 
   private seedModels(): void {
@@ -189,15 +234,38 @@ export class AppDatabase {
   }
 
   removeModel(id: string): void {
-    const useCount = this.db
-      .prepare('SELECT COUNT(*) AS count FROM tasks WHERE model_config_id = ?')
+    const active = this.db
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM tasks t
+         JOIN task_items i ON i.task_id = t.id
+         WHERE t.model_config_id = ? AND i.status = 'running'`
+      )
       .get(id) as { count: number }
-    if (useCount.count > 0) {
-      throw new Error('该模型已被历史任务使用，不能删除；可将它停用。')
+    if (active.count > 0) {
+      throw new Error('有任务正在使用这个模型，请等它处理完再删除。')
     }
     const model = this.getModel(id)
-    if (model?.isDefault) throw new Error('默认模型不能删除，请先设置其他默认模型。')
-    this.db.prepare('DELETE FROM model_configs WHERE id = ?').run(id)
+    if (!model) throw new Error('找不到这个模型。')
+    if (model.isDefault) throw new Error('默认模型不能删除，请先设置其他默认模型。')
+
+    const queued = this.db
+      .prepare("SELECT id FROM tasks WHERE model_config_id = ? AND status = 'queued'")
+      .all(id) as DbRow[]
+    const transaction = this.db.transaction(() => {
+      const now = new Date().toISOString()
+      this.db
+        .prepare(
+          `UPDATE task_items
+           SET status = 'failed', error = '模型已被删除。', updated_at = ?
+           WHERE status = 'queued'
+             AND task_id IN (SELECT id FROM tasks WHERE model_config_id = ?)`
+        )
+        .run(now, id)
+      for (const row of queued) this.refreshTaskStatus(String(row.id))
+      this.db.prepare('DELETE FROM model_configs WHERE id = ?').run(id)
+    })
+    transaction()
   }
 
   createTask(input: CreateTaskInput): ImageTask {
@@ -208,14 +276,17 @@ export class AppDatabase {
       `${basename(input.imagePaths[0] ?? '新任务')}${input.imagePaths.length > 1 ? ` 等 ${input.imagePaths.length} 张` : ''}`
     const name = this.uniqueTaskName(requestedName)
 
+    const model = this.getModel(input.modelConfigId)
+    if (!model) throw new Error('找不到这个模型。')
+
     const transaction = this.db.transaction(() => {
       this.db
         .prepare(
           `INSERT INTO tasks
-           (id, name, operation, prompt, model_config_id, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)`
+           (id, name, operation, prompt, model_config_id, model_name, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`
         )
-        .run(id, name, input.operation, input.prompt, input.modelConfigId, now, now)
+        .run(id, name, input.operation, input.prompt, input.modelConfigId, model.name, now, now)
 
       const insertItem = this.db.prepare(
         `INSERT INTO task_items
@@ -242,12 +313,12 @@ export class AppDatabase {
   listTasks(): ImageTask[] {
     const rows = this.db
       .prepare(
-        `SELECT t.*, m.name AS model_name,
+        `SELECT ${TASK_SELECT_COLUMNS},
           COUNT(i.id) AS total,
           SUM(CASE WHEN i.status = 'completed' THEN 1 ELSE 0 END) AS completed,
           SUM(CASE WHEN i.status = 'failed' THEN 1 ELSE 0 END) AS failed
          FROM tasks t
-         JOIN model_configs m ON m.id = t.model_config_id
+         LEFT JOIN model_configs m ON m.id = t.model_config_id
          LEFT JOIN task_items i ON i.task_id = t.id
          GROUP BY t.id
          ORDER BY t.created_at DESC`
@@ -259,12 +330,12 @@ export class AppDatabase {
   getTask(id: string): ImageTask | null {
     const row = this.db
       .prepare(
-        `SELECT t.*, m.name AS model_name,
+        `SELECT ${TASK_SELECT_COLUMNS},
           COUNT(i.id) AS total,
           SUM(CASE WHEN i.status = 'completed' THEN 1 ELSE 0 END) AS completed,
           SUM(CASE WHEN i.status = 'failed' THEN 1 ELSE 0 END) AS failed
          FROM tasks t
-         JOIN model_configs m ON m.id = t.model_config_id
+         LEFT JOIN model_configs m ON m.id = t.model_config_id
          LEFT JOIN task_items i ON i.task_id = t.id
          WHERE t.id = ?
          GROUP BY t.id`
@@ -292,9 +363,10 @@ export class AppDatabase {
     outputPath: string | null = null,
     error: string | null = null
   ): void {
-    const row = this.db.prepare('SELECT task_id FROM task_items WHERE id = ?').get(id) as {
-      task_id: string
-    }
+    const row = this.db.prepare('SELECT task_id FROM task_items WHERE id = ?').get(id) as
+      | { task_id: string }
+      | undefined
+    if (!row) return
     const now = new Date().toISOString()
     this.db
       .prepare(
@@ -302,6 +374,35 @@ export class AppDatabase {
       )
       .run(status, outputPath, error, now, id)
     this.refreshTaskStatus(row.task_id)
+  }
+
+  removeTasks(ids: string[]): Array<{ taskId: string; paths: string[] }> {
+    const removed: Array<{ taskId: string; paths: string[] }> = []
+    const transaction = this.db.transaction(() => {
+      for (const id of ids) {
+        const task = this.getTask(id)
+        if (!task || task.status === 'running') continue
+        removed.push({
+          taskId: task.id,
+          paths: (task.items ?? []).flatMap((item) => (item.outputPath ? [item.outputPath] : []))
+        })
+        this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
+      }
+    })
+    transaction()
+    return removed
+  }
+
+  failQueuedItems(taskId: string, message: string): void {
+    const now = new Date().toISOString()
+    this.db
+      .prepare(
+        `UPDATE task_items
+         SET status = 'failed', error = ?, updated_at = ?
+         WHERE task_id = ? AND status = 'queued'`
+      )
+      .run(message, now, taskId)
+    this.refreshTaskStatus(taskId)
   }
 
   retryTask(id: string): void {
@@ -373,20 +474,11 @@ export class AppDatabase {
   }
 
   private protectSecret(value: string): string {
-    if (!value) return ''
-    if (safeStorage.isEncryptionAvailable()) {
-      return `safe:${safeStorage.encryptString(value).toString('base64')}`
-    }
-    return `local:${Buffer.from(value).toString('base64')}`
+    return this.secrets.protect(value)
   }
 
   private unprotectSecret(value: string): string {
-    if (!value) return ''
-    const [kind, encoded] = value.split(':', 2)
-    if (!encoded) return value
-    if (kind === 'safe') return safeStorage.decryptString(Buffer.from(encoded, 'base64'))
-    if (kind === 'local') return Buffer.from(encoded, 'base64').toString()
-    return value
+    return this.secrets.unprotect(value)
   }
 
   private mapModel(row: DbRow, includeSecret = true): ModelConfig {

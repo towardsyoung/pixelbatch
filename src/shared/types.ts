@@ -83,10 +83,28 @@ export interface SaveModelInput {
   isDefault: boolean
 }
 
+export interface TestModelInput {
+  id?: string
+  name?: string
+  provider: ProviderType
+  baseUrl: string
+  apiKey?: string
+  model: string
+}
+
+export interface TestModelResult {
+  message: string
+}
+
 export interface ExportResultsResult {
   canceled: boolean
   directory: string | null
   count: number
+}
+
+export interface RemoveTasksResult {
+  deletedIds: string[]
+  skippedIds: string[]
 }
 
 export interface FolderImageSelection {
@@ -108,7 +126,9 @@ export interface AppApi {
     create: (input: CreateTaskInput) => Promise<ImageTask>
     rename: (id: string, name: string) => Promise<ImageTask>
     retry: (id: string) => Promise<void>
+    cancel: (id: string) => Promise<void>
     exportCompleted: (id: string) => Promise<ExportResultsResult>
+    remove: (ids: string[]) => Promise<RemoveTasksResult>
   }
   prompts: {
     list: () => Promise<PromptPreset[]>
@@ -119,6 +139,7 @@ export interface AppApi {
     list: () => Promise<ModelConfig[]>
     save: (input: SaveModelInput) => Promise<ModelConfig>
     remove: (id: string) => Promise<void>
+    test: (input: TestModelInput) => Promise<TestModelResult>
   }
   system: {
     revealFile: (path: string) => Promise<void>
